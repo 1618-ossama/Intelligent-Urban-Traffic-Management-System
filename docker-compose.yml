@@ -1,0 +1,192 @@
+version: '3.8'
+
+services:
+  # ═══════════════════════════════════════════
+  # INFRASTRUCTURE
+  # ═══════════════════════════════════════════
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: iutms-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - iutms-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: iutms-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - iutms-network
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: iutms-kafka-init
+    depends_on:
+      - kafka
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      echo 'Waiting for Kafka to be ready...'
+      cub kafka-ready -b kafka:29092 1 60
+      echo 'Creating Kafka topics...'
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 3 --replication-factor 1 --topic traffic-flow
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 3 --replication-factor 1 --topic pollution-data
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 3 --replication-factor 1 --topic camera-events
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 3 --replication-factor 1 --topic noise-data
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 3 --replication-factor 1 --topic signal-events
+      echo 'All topics created!'
+      kafka-topics --list --bootstrap-server kafka:29092
+      "
+    networks:
+      - iutms-network
+
+  mysql:
+    image: mysql:8.0
+    container_name: iutms-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: iutms_db
+      MYSQL_USER: iutms_user
+      MYSQL_PASSWORD: iutms_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./sql/seed-data.sql:/docker-entrypoint-initdb.d/02-seed.sql
+      - mysql-data:/var/lib/mysql
+    networks:
+      - iutms-network
+
+  # ═══════════════════════════════════════════
+  # SERVICES
+  # ═══════════════════════════════════════════
+  service-flux:
+    build:
+      context: .
+      dockerfile: service-flux-vehicules/Dockerfile
+    container_name: iutms-flux
+    ports:
+      - "8081:8081"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      - kafka
+      - kafka-init
+    networks:
+      - iutms-network
+
+  service-pollution:
+    build:
+      context: .
+      dockerfile: service-pollution/Dockerfile
+    container_name: iutms-pollution
+    ports:
+      - "8082:8082"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      - kafka
+      - kafka-init
+    networks:
+      - iutms-network
+
+  service-camera:
+    build:
+      context: .
+      dockerfile: service-camera/Dockerfile
+    container_name: iutms-camera
+    ports:
+      - "1099:1099"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      - kafka
+      - kafka-init
+    networks:
+      - iutms-network
+
+  service-bruit:
+    build:
+      context: .
+      dockerfile: service-bruit/Dockerfile
+    container_name: iutms-bruit
+    ports:
+      - "9090:9090"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      - kafka
+      - kafka-init
+    networks:
+      - iutms-network
+
+  service-feux:
+    build:
+      context: .
+      dockerfile: service-feux/Dockerfile
+    container_name: iutms-feux
+    ports:
+      - "8084:8084"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      - kafka
+      - kafka-init
+    networks:
+      - iutms-network
+
+  central-engine:
+    build:
+      context: .
+      dockerfile: central-engine/Dockerfile
+    container_name: iutms-engine
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DB: iutms_db
+      MYSQL_USER: iutms_user
+      MYSQL_PASS: iutms_pass
+    depends_on:
+      - kafka
+      - kafka-init
+      - mysql
+    networks:
+      - iutms-network
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: iutms-dashboard
+    ports:
+      - "3000:80"
+    depends_on:
+      - central-engine
+    networks:
+      - iutms-network
+
+volumes:
+  mysql-data:
+
+networks:
+  iutms-network:
+    driver: bridge
