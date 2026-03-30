@@ -1,8 +1,6 @@
 FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /app
-COPY pom.xml ./pom.xml
-COPY common/ ./common/
-COPY central-engine/ ./central-engine/
+COPY . .
 RUN mvn -pl common,central-engine -am clean package -DskipTests -q
 
 FROM eclipse-temurin:17-jre

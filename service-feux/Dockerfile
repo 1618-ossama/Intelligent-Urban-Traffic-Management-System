@@ -1,8 +1,6 @@
 FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /app
-COPY pom.xml ./pom.xml
-COPY common/ ./common/
-COPY service-feux/ ./service-feux/
+COPY . .
 RUN mvn -pl common,service-feux -am clean package -DskipTests -q
 
 FROM tomcat:9-jre17

@@ -65,7 +65,7 @@ services:
       MYSQL_USER: iutms_user
       MYSQL_PASSWORD: iutms_pass
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./sql/seed-data.sql:/docker-entrypoint-initdb.d/02-seed.sql
